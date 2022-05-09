@@ -1,0 +1,249 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using Server.Hubs
+@inject NavigationManager NavManager
+
+<PageTitle>Chat</PageTitle>
+
+@if (!_isChatting)
+{
+    <MudStack Justify="Justify.Center" AlignItems="AlignItems.Center">
+        <MudButton Variant="Variant.Filled"
+            Color="Color.Info"
+            StartIcon="@Icons.Filled.ChatBubble" 
+            OnClick="Chat"
+            Style="max-width:20rem;">
+            Click here to chat
+        </MudButton>
+        @if (_message != null)
+        {
+            <div class="invalid-feedback">@_message</div>
+            <small id="emailHelp" class="form-text text-muted">@_message</small>
+        }
+    </MudStack>
+}
+else
+{
+    <MudStack Row=true Justify="Justify.SpaceBetween">
+        <div style="width:200px;"></div><!--Offset-->
+        <div class="flex-grow-1">
+            <MudStack Justify="Justify.SpaceBetween" Style="min-height:90vh;">
+                <MudStack Style="overflow-y:auto;">
+                    @foreach (var item in _messages)
+                    {
+                        if (item.Notification)
+                        {
+                            <MudPaper Outlined=true
+                                Class="pa-3">
+                                <MudStack>
+                                    <MudText Typo="Typo.subtitle2">@item.Datetime</MudText>
+                                    <MudText Typo="Typo.body2">@item.Body</MudText>
+                                </MudStack>
+                            </MudPaper>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="item.Mine ? Severity.Info : Severity.Success"
+                                NoIcon=true
+                                Variant="Variant.Filled">
+                                <MudText Typo="Typo.subtitle2">@item.Username <span style="font-weight:400;">@item.Datetime</span></MudText>
+                                <MudText Typo="Typo.body2">@item.Body</MudText>
+                            </MudAlert>
+                        }
+                    }
+                </MudStack>
+                <MudPaper Class="pa-4">
+                    <MudTextField T="string"
+                        Label="Message"
+                        Variant="Variant.Outlined" 
+                        Lines="2" 
+                        Placeholder="Enter message"
+                        Immediate="true"
+                        @bind-Value="_newMessage" />
+                    <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                        @if (_newMessage != string.Empty)
+                        {
+                            <MudButton Variant="Variant.Filled"
+                                Color="Color.Warning"
+                                StartIcon="@Icons.Filled.Clear"
+                                OnClick="Clear">
+                                Clear
+                            </MudButton>
+                        }
+                        <MudButton Variant="Variant.Filled"
+                            Color="Color.Primary"
+                            StartIcon="@Icons.Filled.ChatBubble"
+                            OnClick="@(() => SendMessageToAllAsync(_newMessage))">
+                            Send
+                        </MudButton>
+                    </MudStack>
+                </MudPaper>
+            </MudStack>
+        </div>
+        <div>
+            <MudExpansionPanels>
+                <MudExpansionPanel HideIcon="true" IsInitiallyExpanded="true">
+                    <TitleContent>
+                        <div class="d-flex">
+                            <MudText Class="mt-1">Connected</MudText>
+                            <MudBadge Content="@_activeConnections?.Count" Color="Color.Primary" Overlap="true" Class="d-flex ml-auto">
+                                <MudIcon Icon="@Icons.Material.Filled.People" Color="Color.Default" />
+                            </MudBadge>
+                        </div>
+                    </TitleContent>
+                    <ChildContent>
+                        <MudList Dense="true">
+                            @foreach (var connection in _activeConnections.Select(x => x.Value))
+                            {
+                                <MudListItem Text="@connection"
+                                    Icon="@Icons.Filled.Circle"
+                                    IconSize="Size.Small"
+                                    IconColor="Color.Success"/>
+                            }
+                        </MudList>
+                    </ChildContent>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        </div>
+    </MudStack>
+}
+
+@code {
+    [CascadingParameter] 
+    public MainLayout MainLayout { get; set; }
+
+    // flag to indicate chat status
+    private bool _isChatting = false;
+
+    // unique connection id given by the server
+    private string _connectionId = string.Empty;
+
+    // name of the user given by the server
+    private string _username = string.Empty;
+
+    // on-screen message
+    private string _message = string.Empty;
+
+    // new message input
+    private string _newMessage = string.Empty;
+
+    // list of messages in chat
+    private List<Message>? _messages = null;
+
+    // list of active connections
+    private Dictionary<string, string>? _activeConnections = null;
+
+    private string _hubUrl = string.Empty;
+    private HubConnection? _hubConnection;
+
+    public async Task Chat()
+    {
+        try
+        {
+            // Initalize chat props
+            _messages = new();
+            _activeConnections = new();
+
+            // Create the chat client
+            string baseUrl = NavManager.BaseUri;
+            _hubUrl = baseUrl.TrimEnd('/') + ChatHub.Url;
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(_hubUrl)
+                .Build();
+
+            // Handlers
+            _hubConnection.On<string, string>("OnConnectedSuccessful", OnConnectedSuccessful);
+            _hubConnection.On<Dictionary<string, string>>("OnUpdatedConnectionsList", OnUpdatedConnectionsList);
+            _hubConnection.On<string>("Broadcast", BroadcastMessage);
+            _hubConnection.On<string, string, string>("MessageAll", MessageAll);
+
+            // Start connection
+            await _hubConnection.StartAsync();
+
+            // Start chatting and force refresh UI.
+            _isChatting = true;
+            await Task.Delay(1);
+        }
+        catch (Exception e)
+        {
+            _message = $"ERROR: Failed to start chat client: {e.Message}";
+            _isChatting = false;
+        }
+    }
+
+    private void OnConnectedSuccessful(string connectionId, string givenUsername)
+    {
+        _connectionId = connectionId;
+        _username = givenUsername;
+        MainLayout.SetUserName(_username);
+        StateHasChanged();
+    }
+
+    private void OnUpdatedConnectionsList(Dictionary<string, string> connectionsList)
+    {
+        _activeConnections = connectionsList;
+        StateHasChanged();
+    }
+
+    private void BroadcastMessage(string message)
+    {
+        _messages?.Add(new Message(string.Empty, message, notification: true));
+        StateHasChanged();
+    }
+
+    private void MessageAll(string connectionId, string username, string message)
+    {
+        bool isMine = connectionId.Equals(_connectionId, StringComparison.OrdinalIgnoreCase);
+
+        _messages?.Add(new Message(username, message, isMine));
+        StateHasChanged();
+    }
+
+    private async Task DisconnectAsync()
+    {
+        if (_isChatting)
+        {
+            await _hubConnection!.StopAsync();
+            await _hubConnection.DisposeAsync();
+
+            _activeConnections = null;
+            _hubConnection = null;
+            _isChatting = false;
+        }
+    }
+
+    private async Task SendBroadcastAsync(string message)
+    {
+        await _hubConnection!.SendAsync("Broadcast", message);
+    }
+
+    private async Task SendMessageToAllAsync(string message)
+    {
+        if (_isChatting && !string.IsNullOrWhiteSpace(message))
+        {
+            await _hubConnection!.SendAsync("MessageAll", _connectionId, message);
+
+            _newMessage = string.Empty;
+        }
+    }
+
+    private void Clear() => _newMessage = string.Empty;
+
+    private class Message
+    {
+        public Message(string username, string body, bool mine = false, bool notification = false)
+        {
+            Username = username;
+            Body = body;
+            Datetime = DateTime.Now.ToShortTimeString();
+            Mine = mine;
+            Notification = notification;
+        }
+
+        public string Username { get; init; }
+        public string Body { get; init; }
+        public string Datetime { get; init; }
+        public bool Mine { get; init; }
+        public bool Notification { get; init; }
+    }
+}

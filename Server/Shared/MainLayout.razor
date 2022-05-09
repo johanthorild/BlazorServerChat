@@ -1,0 +1,65 @@
+﻿@inherits LayoutComponentBase
+
+<MudThemeProvider @ref="@_mudThemeProvider" @bind-IsDarkMode="@_isDarkMode"/>
+<MudDialogProvider/>
+<MudSnackbarProvider/>
+
+@if (_renderDone)
+{
+    <MudAppBar Color="Color.Transparent" Elevation="0">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Baseline" Style="min-width:98vw;">
+            <div>
+                Blazor SignalR Chat Sample
+            </div>
+            <div>
+                @if (!string.IsNullOrWhiteSpace(ConnectedAs))
+                {
+                    <MudText Typo="Typo.subtitle1">
+                        Connected as <strong>@ConnectedAs</strong>
+                        <MudButton Variant="Variant.Filled"
+                            Color="Color.Error"
+                            Size="Size.Small">
+                            Disconnect
+                        </MudButton>
+                    </MudText>
+                }
+            </div>
+            <div>
+                <MudToggleIconButton @bind-Toggled="@_isDarkMode" 
+                    Color="Color.Default" 
+                    Icon="@Icons.Outlined.Brightness2" 
+                    ToggledIcon="@Icons.Outlined.WbSunny"/>
+            </div>
+        </MudStack>
+    </MudAppBar>
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.Large" Style="margin-top:2rem;">
+            <CascadingValue Value="this">
+                @Body
+            </CascadingValue>
+        </MudContainer>
+    </MudMainContent>
+}
+
+@code {
+    private bool _renderDone = false;
+    private bool _isDarkMode;
+    private MudThemeProvider? _mudThemeProvider;
+    public string? ConnectedAs = null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _isDarkMode = await _mudThemeProvider!.GetSystemPreference();
+            _renderDone = true;
+            StateHasChanged();
+        }
+    }
+
+    public void SetUserName(string userName)
+    {
+        ConnectedAs = userName;
+        StateHasChanged();
+    }
+}
